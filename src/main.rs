@@ -47,7 +47,7 @@ fn main() {
     let samps = env::args().nth(1).map(|s| s.parse().unwrap()).unwrap_or(1);
     let cam = Ray::new(Vector::new(50.0, 52.0, 295.6), Vector::new(0.0, -0.042612, -1.0).norm());
     let cx = Vector::new((w as f64) * 0.5135 / (h as f64), 0.0, 0.0);
-    let cy = cx.cross(cam.d).norm().mult_s(0.5135);
+    let cy = cx.cross(cam.d).norm() * 0.5135;
     let black = RGB { r: 0, g: 0, b: 0 };
     let image = Arc::new(Mutex::new(vec![black; w * h]));
     let mut threads = Vec::with_capacity(4);
@@ -75,16 +75,15 @@ fn main() {
                                 let dx = if r1 < 1.0 { r1.sqrt() - 1.0 } else { 1.0 - (2.0 - r1).sqrt() };
                                 let dy = if r2 < 1.0 { r2.sqrt() - 1.0 } else { 1.0 - (2.0 - r2).sqrt() };
                                 let d =
-                                    Vector::add(
-                                        cx.mult_s(((sx as f64 + 0.5 + dx) / 2.0 + x as f64) / (w as f64) - 0.5),
-                                        cy.mult_s(((sy as f64 + 0.5 + dy) / 2.0 + y as f64) / (h as f64) - 0.5))
-                                    .add(cam.d);
+                                    cx * (((sx as f64 + 0.5 + dx) / 2.0 + x as f64) / (w as f64) - 0.5) +
+                                    cy * (((sy as f64 + 0.5 + dy) / 2.0 + y as f64) / (h as f64) - 0.5) +
+                                    cam.d;
 
-                                let ray = Ray::new(cam.o.add(d.mult_s(140.0)), d.norm());
-                                r = r.add(render::radiance(&*scene, ray, 0, &mut xi).mult_s(1.0 / samps as f64));
+                                let ray = Ray::new(cam.o + d * 140.0, d.norm());
+                                r = r + render::radiance(&*scene, ray, 0, &mut xi) / samps as f64;
                             }
 
-                            c = c.add(Vector::new(clamp(r.x), clamp(r.y), clamp(r.z))).mult_s(0.25);
+                            c = c + Vector::new(clamp(r.x), clamp(r.y), clamp(r.z)) / 4.0;
                         }
                     }
 

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use rand::Rng;
 use std::f64;
+use std::ops::{Add,Sub,Mul,Div};
 
 #[derive(Copy, Clone)]
 pub struct Vector {
@@ -13,25 +14,51 @@ impl Vector {
     pub fn new(x: f64, y: f64, z: f64) -> Self {
         Vector { x: x, y: y, z: z }
     }
+}
 
-    pub fn add(self, other: Vector) -> Self {
+impl Add for Vector {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
         Self::new(self.x + other.x, self.y + other.y, self.z + other.z)
     }
+}
 
-    pub fn sub(self, other: Vector) -> Self {
+impl Sub for Vector {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
         Self::new(self.x - other.x, self.y - other.y, self.z - other.z)
     }
+}
 
-    pub fn mult(self, other: Vector) -> Self {
+impl Mul for Vector {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
         Self::new(self.x * other.x, self.y * other.y, self.z * other.z)
     }
+}
 
-    pub fn mult_s(self, n: f64) -> Self {
+impl Mul<f64> for Vector {
+    type Output = Self;
+
+    fn mul(self, n: f64) -> Self {
         Self::new(self.x * n, self.y * n, self.z * n)
     }
+}
 
+impl Div<f64> for Vector {
+    type Output = Self;
+
+    fn div(self, n: f64) -> Self {
+        Self::new(self.x / n, self.y / n, self.z / n)
+    }
+}
+
+impl Vector {
     pub fn norm(self) -> Self {
-        self.mult_s(1.0 / (self.x * self.x + self.y * self.y + self.z * self.z).sqrt())
+        self / (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
     }
 
     pub fn dot(self, other: Vector) -> f64 {
@@ -75,7 +102,7 @@ impl Sphere {
     }
 
     pub fn intersect(&self, ray: Ray) -> Option<f64> {
-        let op = self.p.sub(ray.o);
+        let op = self.p - ray.o;
         let eps = 1e-4;
         let b = op.dot(ray.d);
         let det = b * b - op.dot(op) + self.rad * self.rad;
@@ -121,13 +148,13 @@ fn intersect(scene: &[Sphere], ray: Ray) -> Option<(&Sphere, f64)> {
 #[allow(non_snake_case)]
 pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> Vector {
     if let Some((obj, t)) = intersect(scene, ray) {
-        let x = ray.o.add(ray.d.mult_s(t));
-        let n = x.sub(obj.p).norm();
+        let x = ray.o + (ray.d * t);
+        let n = (x - obj.p).norm();
         let nl =
             if n.dot(ray.d) < 0.0 {
                 n
             } else {
-                n.mult_s(-1.0)
+                n * -1.0
             };
 
         let mut f = obj.c;
@@ -147,7 +174,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                 return obj.e;
             }
 
-            f = f.mult_s(1.0 / p);
+            f = f / p;
         }
 
         let next =
@@ -159,23 +186,18 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                     let w = nl;
                     let u = (if w.x.abs() > 0.1 { Vector::new(0.0, 1.0, 0.0) } else { Vector::new(1.0, 0.0, 0.0) }).cross(w).norm();
                     let v = w.cross(u);
-                    let d =
-                        u.mult_s(r1.cos() * r2s)
-                         .add(v.mult_s(r1.sin() * r2s))
-                         .add(w.mult_s((1.0 - r2).sqrt()))
-                         .norm();
-
+                    let d = (u * (r1.cos() * r2s) + (v * (r1.sin() * r2s)) + (w * ((1.0 - r2).sqrt()))).norm();
                     let ray = Ray::new(x, d);
                     radiance(scene, ray, depth, Xi)
                 },
 
                 Refl::Spec => {
-                    let ray = Ray::new(x, ray.d.sub(n.mult_s(2.0 * n.dot(ray.d))));
-                    obj.e.add(f.mult(radiance(scene, ray, depth, Xi)))
+                    let ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
+                    obj.e + f * radiance(scene, ray, depth, Xi)
                 },
 
                 Refl::Refr => {
-                    let refl_ray = Ray::new(x, ray.d.sub(n.mult_s(2.0 * n.dot(ray.d))));
+                    let refl_ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
                     let into = n.dot(nl) > 0.0;
                     let nc = 1.0;
                     let nt = 1.5;
@@ -185,12 +207,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                     if cos2t < 0.0 {
                         radiance(scene, refl_ray, depth, Xi)
                     } else {
-                        let tdir =
-                            Vector::sub(
-                                ray.d.mult_s(nnt),
-                                n.mult_s((if into { 1.0 } else { -1.0 }) * (ddn * nnt + cos2t.sqrt())))
-                            .norm();
-
+                        let tdir = (ray.d * nnt - n * ((if into { 1.0 } else { -1.0 }) * (ddn * nnt + cos2t.sqrt()))).norm();
                         let a = nt - nc;
                         let b = nt + nc;
                         let R0 = a * a / (b * b);
@@ -202,22 +219,20 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                         let TP = Tr / (1.0 - P);
                         if depth > 2 {
                             if Xi.next_f64() < P {
-                                radiance(scene, refl_ray, depth, Xi).mult_s(RP)
+                                radiance(scene, refl_ray, depth, Xi) * RP
                             } else {
                                 let ray = Ray::new(x, tdir);
-                                radiance(scene, ray, depth, Xi).mult_s(TP)
+                                radiance(scene, ray, depth, Xi) * TP
                             }
                         } else {
                             let ray = Ray::new(x, tdir);
-                            Vector::add(
-                                radiance(scene, refl_ray, depth, Xi).mult_s(Re),
-                                radiance(scene, ray, depth, Xi).mult_s(Tr))
+                            radiance(scene, refl_ray, depth, Xi) * Re + radiance(scene, ray, depth, Xi) * Tr
                         }
                     }
                 }
             };
 
-        obj.e.add(f.mult(next))
+        obj.e + f * next
     } else {
         Vector::new(0.0, 0.0, 0.0)
     }
