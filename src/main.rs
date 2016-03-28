@@ -26,6 +26,20 @@ fn to_int(x: f64) -> u8 {
     (clamp(x).powf(1.0 / 2.2) * 255.0 + 0.5) as u8
 }
 
+struct RenderShared {
+    image: Vec<RGB<u8>>,
+    progress: usize,
+}
+
+impl RenderShared {
+    pub fn new(width: usize, height: usize) -> Self {
+        RenderShared {
+            image: vec![RGB { r: 0, g: 0, b: 0 }; width * height],
+            progress: 0
+        }
+    }
+}
+
 fn main() {
     let zero = Vector::new(0.0, 0.0, 0.0);
 
@@ -48,20 +62,24 @@ fn main() {
     let cam = Ray::new(Vector::new(50.0, 52.0, 295.6), Vector::new(0.0, -0.042612, -1.0).norm());
     let cx = Vector::new((w as f64) * 0.5135 / (h as f64), 0.0, 0.0);
     let cy = cx.cross(cam.d).norm() * 0.5135;
-    let black = RGB { r: 0, g: 0, b: 0 };
-    let image = Arc::new(Mutex::new(vec![black; w * h]));
+    let shared = Arc::new(Mutex::new(RenderShared::new(w, h)));
     let mut threads = Vec::with_capacity(4);
     for i in 0 .. threads.capacity() {
         let scene = scene.clone();
-        let image = image.clone();
+        let shared = shared.clone();
         let th = h / threads.capacity();
         let y0 = th * i;
         let y1 = th * (i + 1);
         let mut line = Vec::with_capacity(w);
         let mut xi = StdRng::new().unwrap();
-        threads.push(thread::Builder::new().stack_size(4 * 1024 * 1024).spawn(move || {
+        threads.push(thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(move || {
             for y in y0 .. y1 {
-                let _ = write!(io::stderr(), "\rRendering ({} spp) {:-3.2}%", samps * 4, 100.0 * (y as f64) / (h as f64 - 1.0));
+                {
+                    let mut shared = shared.lock().unwrap();
+                    let _ = write!(io::stderr(), "\rRendering ({} spp) {:-3.2}%", samps * 4, (100.0 * shared.progress as f64) / h as f64);
+                    shared.progress += 1;
+                }
+
                 xi.reseed(&[y * y * y]);
                 line.clear();
                 for x in 0 .. w {
@@ -91,9 +109,9 @@ fn main() {
                 }
 
                 let offset = (h - y - 1) * w;
-                let mut image = image.lock().unwrap();
+                let mut shared = shared.lock().unwrap();
                 for (i, pixel) in line.iter().enumerate() {
-                    image[offset + i] = *pixel;
+                    shared.image[offset + i] = *pixel;
                 }
             }
         }).unwrap());
@@ -103,6 +121,6 @@ fn main() {
         thread.join().unwrap();
     }
 
-    let image = image.lock().unwrap();
-    lodepng::encode24_file("image.png", &image, w, h).unwrap();
+    let shared = shared.lock().unwrap();
+    lodepng::encode24_file("image.png", &shared.image, w, h).unwrap();
 }
