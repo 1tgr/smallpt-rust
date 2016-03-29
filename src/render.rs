@@ -1,6 +1,6 @@
 use rand::Rng;
 use std::f64;
-use std::ops::{Add,Sub,Mul,Div};
+use std::ops::{Add, Sub, Mul, Div};
 
 #[derive(Copy, Clone)]
 pub struct Vector {
@@ -65,7 +65,9 @@ impl Vector {
     }
 
     pub fn cross(self, other: Vector) -> Self {
-        Self::new(self.y * other.z - self.z * other.y, self.z * other.x - self.x * other.z, self.x * other.y - self.y * other.x)
+        Self::new(self.y * other.z - self.z * other.y,
+                  self.z * other.x - self.x * other.z,
+                  self.x * other.y - self.y * other.x)
     }
 }
 
@@ -97,7 +99,13 @@ pub struct Sphere {
 
 impl Sphere {
     pub fn new(rad: f64, p: Vector, e: Vector, c: Vector, refl: Refl) -> Self {
-        Sphere { rad: rad, p: p, e: e, c: c, refl: refl}
+        Sphere {
+            rad: rad,
+            p: p,
+            e: e,
+            c: c,
+            refl: refl,
+        }
     }
 
     pub fn intersect(&self, ray: Ray) -> Option<f64> {
@@ -124,22 +132,20 @@ impl Sphere {
     }
 }
 
-fn min_by_float_key<T: Iterator<Item=U>, U, F: Fn(&U) -> f64>(iter: &mut T, f: F) -> Option<U> {
+fn min_by_float_key<T: Iterator<Item = U>, U, F: Fn(&U) -> f64>(iter: &mut T, f: F) -> Option<U> {
     iter.fold(None, |min_opt, item| {
             let key = f(&item);
             match min_opt {
                 Some((min_key, _)) if min_key < key => min_opt,
-                _ => Some((key, item))
+                _ => Some((key, item)),
             }
         })
         .map(|(_, min_item)| min_item)
 }
 
 fn intersect(scene: &[Sphere], ray: Ray) -> Option<(&Sphere, f64)> {
-    let mut hits =
-        scene
-            .iter()
-            .filter_map(|s| s.intersect(ray).map(|t| (s, t)));
+    let mut hits = scene.iter()
+                        .filter_map(|s| s.intersect(ray).map(|t| (s, t)));
 
     min_by_float_key(&mut hits, |&(_, t)| t)
 }
@@ -149,23 +155,21 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
     if let Some((obj, t)) = intersect(scene, ray) {
         let x = ray.o + (ray.d * t);
         let n = (x - obj.p).norm();
-        let nl =
-            if n.dot(ray.d) < 0.0 {
-                n
-            } else {
-                n * -1.0
-            };
+        let nl = if n.dot(ray.d) < 0.0 {
+            n
+        } else {
+            n * -1.0
+        };
 
         let mut f = obj.c;
 
-        let p =
-            if f.x > f.y && f.x > f.z {
-                f.x
-            } else if f.y > f.z {
-                f.y
-            } else {
-                f.z
-            };
+        let p = if f.x > f.y && f.x > f.z {
+            f.x
+        } else if f.y > f.z {
+            f.y
+        } else {
+            f.z
+        };
 
         let depth = depth + 1;
         if depth > 5 {
@@ -176,60 +180,83 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
             f = f / p;
         }
 
-        let next =
-            match obj.refl {
-                Refl::Diff => {
-                    let r1 = 2.0 * f64::consts::PI * Xi.next_f64();
-                    let r2 = Xi.next_f64();
-                    let r2s = r2.sqrt();
-                    let w = nl;
-                    let u = (if w.x.abs() > 0.1 { Vector::new(0.0, 1.0, 0.0) } else { Vector::new(1.0, 0.0, 0.0) }).cross(w).norm();
-                    let v = w.cross(u);
-                    let d = (u * (r1.cos() * r2s) + (v * (r1.sin() * r2s)) + (w * ((1.0 - r2).sqrt()))).norm();
-                    let ray = Ray::new(x, d);
-                    radiance(scene, ray, depth, Xi)
-                },
+        let next = match obj.refl {
+            Refl::Diff => {
+                let r1 = 2.0 * f64::consts::PI * Xi.next_f64();
+                let r2 = Xi.next_f64();
+                let r2s = r2.sqrt();
+                let w = nl;
+                let u = (if w.x.abs() > 0.1 {
+                            Vector::new(0.0, 1.0, 0.0)
+                        } else {
+                            Vector::new(1.0, 0.0, 0.0)
+                        })
+                        .cross(w)
+                        .norm();
+                let v = w.cross(u);
+                let d = (u * (r1.cos() * r2s) + (v * (r1.sin() * r2s)) + (w * ((1.0 - r2).sqrt())))
+                            .norm();
+                let ray = Ray::new(x, d);
+                radiance(scene, ray, depth, Xi)
+            }
 
-                Refl::Spec => {
-                    let ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
-                    obj.e + f * radiance(scene, ray, depth, Xi)
-                },
+            Refl::Spec => {
+                let ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
+                obj.e + f * radiance(scene, ray, depth, Xi)
+            }
 
-                Refl::Refr => {
-                    let refl_ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
-                    let into = n.dot(nl) > 0.0;
-                    let nc = 1.0;
-                    let nt = 1.5;
-                    let nnt = if into { nc / nt } else { nt / nc };
-                    let ddn = ray.d.dot(nl);
-                    let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
-                    if cos2t < 0.0 {
-                        radiance(scene, refl_ray, depth, Xi)
+            Refl::Refr => {
+                let refl_ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
+                let into = n.dot(nl) > 0.0;
+                let nc = 1.0;
+                let nt = 1.5;
+                let nnt = if into {
+                    nc / nt
+                } else {
+                    nt / nc
+                };
+                let ddn = ray.d.dot(nl);
+                let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
+                if cos2t < 0.0 {
+                    radiance(scene, refl_ray, depth, Xi)
+                } else {
+                    let tdir = (ray.d * nnt -
+                                n *
+                                ((if into {
+                                   1.0
+                               } else {
+                                   -1.0
+                               }) * (ddn * nnt + cos2t.sqrt())))
+                                   .norm();
+                    let a = nt - nc;
+                    let b = nt + nc;
+                    let R0 = a * a / (b * b);
+                    let c = 1.0 -
+                            (if into {
+                        -ddn
                     } else {
-                        let tdir = (ray.d * nnt - n * ((if into { 1.0 } else { -1.0 }) * (ddn * nnt + cos2t.sqrt()))).norm();
-                        let a = nt - nc;
-                        let b = nt + nc;
-                        let R0 = a * a / (b * b);
-                        let c = 1.0 - (if into { -ddn } else { tdir.dot(n) });
-                        let Re = R0 + (1.0 - R0) * c * c * c * c * c;
-                        let Tr = 1.0 - Re;
-                        let P = 0.25 * 0.5 * Re;
-                        let RP = Re / P;
-                        let TP = Tr / (1.0 - P);
-                        if depth > 2 {
-                            if Xi.next_f64() < P {
-                                radiance(scene, refl_ray, depth, Xi) * RP
-                            } else {
-                                let ray = Ray::new(x, tdir);
-                                radiance(scene, ray, depth, Xi) * TP
-                            }
+                        tdir.dot(n)
+                    });
+                    let Re = R0 + (1.0 - R0) * c * c * c * c * c;
+                    let Tr = 1.0 - Re;
+                    let P = 0.25 * 0.5 * Re;
+                    let RP = Re / P;
+                    let TP = Tr / (1.0 - P);
+                    if depth > 2 {
+                        if Xi.next_f64() < P {
+                            radiance(scene, refl_ray, depth, Xi) * RP
                         } else {
                             let ray = Ray::new(x, tdir);
-                            radiance(scene, refl_ray, depth, Xi) * Re + radiance(scene, ray, depth, Xi) * Tr
+                            radiance(scene, ray, depth, Xi) * TP
                         }
+                    } else {
+                        let ray = Ray::new(x, tdir);
+                        radiance(scene, refl_ray, depth, Xi) * Re +
+                        radiance(scene, ray, depth, Xi) * Tr
                     }
                 }
-            };
+            }
+        };
 
         obj.e + f * next
     } else {
