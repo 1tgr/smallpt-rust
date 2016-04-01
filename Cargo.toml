@@ -4,5 +4,10 @@ version = "0.1.0"
 authors = ["Tim Robinson <tim.g.robinson@gmail.com>"]
 
 [dependencies]
+cairo-rs = "0.0.8"
+glib = "0.0.8"
 rand = "0.3"
-lodepng = "0.5.1"
+
+[dependencies.gtk]
+version = "0.0.7"
+features = ["v3_10"]

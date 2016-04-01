@@ -1,16 +1,26 @@
-extern crate lodepng;
+extern crate cairo;
+extern crate glib;
+extern crate gtk;
 extern crate rand;
 
-mod render;
-
-use lodepng::RGB;
+use cairo::{Format, ImageSurface};
+use gtk::prelude::*;
 use rand::{Rng, SeedableRng, StdRng};
 use render::{Vector, Ray, Sphere};
 use render::Refl::*;
+use std::cell::RefCell;
 use std::env;
-use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::error::Error;
+use std::fmt;
+use std::io::{Write, stderr};
+use std::process;
+use std::rc::Rc;
+use std::result::Result;
+use std::sync::Arc;
+use std::sync::mpsc::{self, Sender};
 use std::thread;
+
+mod render;
 
 fn clamp(x: f64) -> f64 {
     x.max(0.0).min(1.0)
@@ -20,44 +30,22 @@ fn to_int(x: f64) -> u8 {
     (clamp(x).powf(1.0 / 2.2) * 255.0 + 0.5) as u8
 }
 
-struct RenderShared {
-    image: Vec<RGB<u8>>,
-    progress: usize,
-}
-
-impl RenderShared {
-    pub fn new(width: usize, height: usize) -> Self {
-        RenderShared {
-            image: vec![RGB { r: 0, g: 0, b: 0 }; width * height],
-            progress: 0,
-        }
-    }
-}
-
-fn render(shared: &Mutex<RenderShared>,
-          scene: &[Sphere],
+fn render(scene: &[Sphere],
           cam: Ray,
           samps: usize,
           w: usize,
           h: usize,
+          stride: usize,
           y0: usize,
-          y1: usize) {
-    let mut line = Vec::with_capacity(w);
+          y1: usize,
+          sender: Sender<(usize, Vec<u8>)>) {
     let mut xi = StdRng::new().unwrap();
     let cx = Vector::new((w as f64) * 0.5135 / (h as f64), 0.0, 0.0);
     let cy = cx.cross(cam.d).norm() * 0.5135;
     for y in y0..y1 {
-        {
-            let mut shared = shared.lock().unwrap();
-            let _ = write!(io::stderr(),
-                           "\rRendering ({} spp) {:-3.2}%",
-                           samps * 4,
-                           (100.0 * shared.progress as f64) / h as f64);
-            shared.progress += 1;
-        }
-
         xi.reseed(&[y * y * y]);
-        line.clear();
+
+        let mut line = Vec::with_capacity(stride);
         for x in 0..w {
             let mut c = Vector::new(0.0, 0.0, 0.0);
             for sy in 0..2 {
@@ -90,22 +78,49 @@ fn render(shared: &Mutex<RenderShared>,
                 }
             }
 
-            line.push(RGB {
-                r: to_int(c.x),
-                g: to_int(c.y),
-                b: to_int(c.z),
-            });
+            line.push(to_int(c.x));
+            line.push(to_int(c.y));
+            line.push(to_int(c.z));
+            line.push(0);
         }
 
-        let offset = (h - y - 1) * w;
-        let mut shared = shared.lock().unwrap();
-        for (i, pixel) in line.iter().enumerate() {
-            shared.image[offset + i] = *pixel;
-        }
+        sender.send((y, line)).unwrap();
     }
 }
 
-fn main() {
+#[derive(Debug)]
+struct AppError<'a>(&'a str);
+
+impl<'a> AppError<'a> {
+    pub fn new(desc: &'a str) -> Self {
+        AppError(desc)
+    }
+}
+
+impl<'a> fmt::Display for AppError<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl<'a> Error for AppError<'a> {
+    fn description(&self) -> &str {
+        self.0
+    }
+}
+
+fn run() -> Result<i32, Box<Error>> {
+    try!(gtk::init().map_err(|()| AppError::new("Failed to initialise GTK")));
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+
+    window.set_title("smallpt");
+    window.set_border_width(10);
+
+    window.connect_delete_event(|_, _| {
+        gtk::main_quit();
+        Inhibit(false)
+    });
+
     let zero = Vector::new(0.0, 0.0, 0.0);
 
     // Scene: radius, position, emission, color, material
@@ -157,30 +172,76 @@ fn main() {
 
     let w = 1024;
     let h = 768;
-    let shared = Arc::new(Mutex::new(RenderShared::new(w, h)));
+    let stride = w * 4;
+    let threads = 4;
     let samps = env::args().nth(1).map(|s| s.parse().unwrap()).unwrap_or(1);
     let cam = Ray::new(Vector::new(50.0, 52.0, 295.6),
                        Vector::new(0.0, -0.042612, -1.0).norm());
+    let (tx, rx) = mpsc::channel();
 
     {
-        let mut threads = Vec::with_capacity(4);
-        for i in 0..threads.capacity() {
+        let th = h / threads;
+        for i in 0..threads {
             let scene = scene.clone();
-            let shared = shared.clone();
-            let th = h / threads.capacity();
+            let tx = tx.clone();
             let y0 = th * i;
-            let y1 = th * (i + 1);
-            threads.push(thread::Builder::new()
+            let y1 = y0 + th;
+            thread::Builder::new()
                              .stack_size(8 * 1024 * 1024)
-                             .spawn(move || render(&*shared, &*scene, cam, samps, w, h, y0, y1))
-                             .unwrap());
-        }
-
-        for thread in threads {
-            thread.join().unwrap();
+                             .spawn(move || render(&*scene, cam, samps, w, h, stride, y0, y1, tx))
+                             .unwrap();
         }
     }
 
-    let shared = shared.lock().unwrap();
-    lodepng::encode24_file("image.png", &shared.image, w, h).unwrap();
+    let area = gtk::DrawingArea::new();
+    area.set_size_request(w as i32, h as i32);
+    window.add(&area);
+
+    let image = Rc::new(RefCell::new(vec![0; h * stride]));
+
+    {
+        let image = image.clone();
+        area.connect_draw(move |_, cr| {
+            let image = image.borrow().clone();
+            let surface = ImageSurface::create_for_data(image.into_boxed_slice(),
+                                                        |_| (),
+                                                        Format::Rgb24,
+                                                        w as i32,
+                                                        h as i32,
+                                                        stride as i32);
+
+            cr.set_source_surface(&surface, 0.0, 0.0);
+            cr.paint();
+            Inhibit(false)
+        });
+    }
+
+    {
+        let image = image.clone();
+        gtk::timeout_add(200, move || {
+            while let Ok((y, line)) = rx.try_recv() {
+                let y = h - y - 1;
+                let offset = y * stride;
+                let mut image = image.borrow_mut();
+                for (i, byte) in line.iter().enumerate() {
+                    image[offset + i] = *byte;
+                }
+
+                area.queue_draw_area(0, y as i32, w as i32, 1);
+            }
+
+            Continue(true)
+        });
+    }
+
+    window.show_all();
+    gtk::main();
+    Ok(0)
+}
+
+fn main() {
+    process::exit(run().unwrap_or_else(|err| {
+        writeln!(stderr(), "{}", err).unwrap();
+        1
+    }))
 }
