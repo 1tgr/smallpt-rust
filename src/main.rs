@@ -3,7 +3,7 @@ extern crate glib;
 extern crate gtk;
 extern crate rand;
 
-use cairo::{Format, ImageSurface};
+use cairo::{Context, Format, ImageSurface};
 use gtk::prelude::*;
 use rand::{Rng, SeedableRng, StdRng};
 use render::{Vector, Ray, Sphere};
@@ -187,9 +187,9 @@ fn run() -> Result<i32, Box<Error>> {
             let y0 = th * i;
             let y1 = y0 + th;
             thread::Builder::new()
-                             .stack_size(8 * 1024 * 1024)
-                             .spawn(move || render(&*scene, cam, samps, w, h, stride, y0, y1, tx))
-                             .unwrap();
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || render(&*scene, cam, samps, w, h, stride, y0, y1, tx))
+                .unwrap();
         }
     }
 
@@ -197,36 +197,33 @@ fn run() -> Result<i32, Box<Error>> {
     area.set_size_request(w as i32, h as i32);
     window.add(&area);
 
-    let image = Rc::new(RefCell::new(vec![0; h * stride]));
+    let surface = Rc::new(RefCell::new(ImageSurface::create(Format::Rgb24, w as i32, h as i32)));
 
     {
-        let image = image.clone();
+        let surface = surface.clone();
         area.connect_draw(move |_, cr| {
-            let image = image.borrow().clone();
-            let surface = ImageSurface::create_for_data(image.into_boxed_slice(),
-                                                        |_| (),
-                                                        Format::Rgb24,
-                                                        w as i32,
-                                                        h as i32,
-                                                        stride as i32);
-
-            cr.set_source_surface(&surface, 0.0, 0.0);
+            let surface = surface.borrow();
+            cr.set_source_surface(&*surface, 0.0, 0.0);
             cr.paint();
             Inhibit(false)
         });
     }
 
     {
-        let image = image.clone();
+        let surface = surface.clone();
         gtk::timeout_add(200, move || {
             while let Ok((y, line)) = rx.try_recv() {
                 let y = h - y - 1;
-                let offset = y * stride;
-                let mut image = image.borrow_mut();
-                for (i, byte) in line.iter().enumerate() {
-                    image[offset + i] = *byte;
-                }
-
+                let line_surface = ImageSurface::create_for_data(line.into_boxed_slice(),
+                                                                 |_| (),
+                                                                 Format::Rgb24,
+                                                                 w as i32,
+                                                                 1,
+                                                                 stride as i32);
+                let surface = surface.borrow();
+                let cr = Context::new(&*surface);
+                cr.set_source_surface(&line_surface, 0.0, y as f64);
+                cr.paint();
                 area.queue_draw_area(0, y as i32, w as i32, 1);
             }
 
