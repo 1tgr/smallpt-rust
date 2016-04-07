@@ -1,3 +1,5 @@
+#![feature(mpsc_select)]
+
 extern crate cairo;
 extern crate glib;
 extern crate gtk;
@@ -16,8 +18,8 @@ use std::io::{Write, stderr};
 use std::process;
 use std::rc::Rc;
 use std::result::Result;
-use std::sync::Arc;
-use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 mod render;
@@ -30,19 +32,26 @@ fn to_int(x: f64) -> u8 {
     (clamp(x).powf(1.0 / 2.2) * 255.0 + 0.5) as u8
 }
 
+fn next<T: Send>(rx: &Mutex<(Receiver<T>, Receiver<()>)>) -> Result<T, ()> {
+    let (ref rx, ref cancel) = *rx.lock().unwrap();
+    select! {
+        value = rx.recv() => Ok(value.unwrap()),
+        _ = cancel.recv() => Err(())
+    }
+}
+
 fn render(scene: &[Sphere],
           cam: Ray,
           samps: usize,
           w: usize,
           h: usize,
           stride: usize,
-          y0: usize,
-          y1: usize,
-          sender: Sender<(usize, Vec<u8>)>) {
+          rx: &Mutex<(Receiver<usize>, Receiver<()>)>,
+          tx: Sender<(usize, Vec<u8>)>) {
     let mut xi = StdRng::new().unwrap();
     let cx = Vector::new((w as f64) * 0.5135 / (h as f64), 0.0, 0.0);
     let cy = cx.cross(cam.d).norm() * 0.5135;
-    for y in y0..y1 {
+    while let Ok(y) = next(rx) {
         xi.reseed(&[y * y * y]);
 
         let mut line = Vec::with_capacity(stride);
@@ -84,7 +93,7 @@ fn render(scene: &[Sphere],
             line.push(0);
         }
 
-        sender.send((y, line)).unwrap();
+        tx.send((y, line)).unwrap();
     }
 }
 
@@ -177,20 +186,23 @@ fn run() -> Result<i32, Box<Error>> {
     let samps = env::args().nth(1).map(|s| s.parse().unwrap()).unwrap_or(1);
     let cam = Ray::new(Vector::new(50.0, 52.0, 295.6),
                        Vector::new(0.0, -0.042612, -1.0).norm());
-    let (tx, rx) = mpsc::channel();
+    let (tx_work, rx_work) = mpsc::channel();
+    let (tx_cancel, rx_cancel) = mpsc::channel();
+    let (tx_images, rx_images) = mpsc::channel();
+    let work = Arc::new(Mutex::new((rx_work, rx_cancel)));
 
-    {
-        let th = h / threads;
-        for i in 0..threads {
-            let scene = scene.clone();
-            let tx = tx.clone();
-            let y0 = th * i;
-            let y1 = y0 + th;
-            thread::Builder::new()
-                .stack_size(8 * 1024 * 1024)
-                .spawn(move || render(&*scene, cam, samps, w, h, stride, y0, y1, tx))
-                .unwrap();
-        }
+    for _ in 0..threads {
+        let scene = scene.clone();
+        let work = work.clone();
+        let tx_images = tx_images.clone();
+        thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || render(&*scene, cam, samps, w, h, stride, &*work, tx_images))
+            .unwrap();
+    }
+
+    for y in 0..h {
+        tx_work.send(y).unwrap();
     }
 
     let area = gtk::DrawingArea::new();
@@ -212,7 +224,7 @@ fn run() -> Result<i32, Box<Error>> {
     {
         let surface = surface.clone();
         gtk::timeout_add(200, move || {
-            while let Ok((y, line)) = rx.try_recv() {
+            while let Ok((y, line)) = rx_images.try_recv() {
                 let y = h - y - 1;
                 let line_surface = ImageSurface::create_for_data(line.into_boxed_slice(),
                                                                  |_| (),
