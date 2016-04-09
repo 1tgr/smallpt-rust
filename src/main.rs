@@ -7,9 +7,8 @@ extern crate rand;
 
 use cairo::{Context, Format, ImageSurface};
 use gtk::prelude::*;
-use rand::{Rng, SeedableRng, StdRng};
-use render::{Vector, Ray, Sphere};
-use render::Refl::*;
+use radiance::{Vector, Ray, Sphere};
+use radiance::Refl::*;
 use std::cell::RefCell;
 use std::env;
 use std::error::Error;
@@ -19,83 +18,11 @@ use std::process;
 use std::rc::Rc;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
+mod radiance;
 mod render;
-
-fn clamp(x: f64) -> f64 {
-    x.max(0.0).min(1.0)
-}
-
-fn to_int(x: f64) -> u8 {
-    (clamp(x).powf(1.0 / 2.2) * 255.0 + 0.5) as u8
-}
-
-fn next<T: Send>(rx: &Mutex<(Receiver<T>, Receiver<()>)>) -> Result<T, ()> {
-    let (ref rx, ref cancel) = *rx.lock().unwrap();
-    select! {
-        value = rx.recv() => Ok(value.unwrap()),
-        _ = cancel.recv() => Err(())
-    }
-}
-
-fn render(scene: &[Sphere],
-          cam: Ray,
-          samps: usize,
-          w: usize,
-          h: usize,
-          stride: usize,
-          rx: &Mutex<(Receiver<usize>, Receiver<()>)>,
-          tx: Sender<(usize, Vec<u8>)>) {
-    let mut xi = StdRng::new().unwrap();
-    let cx = Vector::new((w as f64) * 0.5135 / (h as f64), 0.0, 0.0);
-    let cy = cx.cross(cam.d).norm() * 0.5135;
-    while let Ok(y) = next(rx) {
-        xi.reseed(&[y * y * y]);
-
-        let mut line = Vec::with_capacity(stride);
-        for x in 0..w {
-            let mut c = Vector::new(0.0, 0.0, 0.0);
-            for sy in 0..2 {
-                for sx in 0..2 {
-                    let mut r = Vector::new(0.0, 0.0, 0.0);
-                    for _ in 0..samps {
-                        let r1 = 2.0 * xi.next_f64();
-                        let r2 = 2.0 * xi.next_f64();
-                        let dx = if r1 < 1.0 {
-                            r1.sqrt() - 1.0
-                        } else {
-                            1.0 - (2.0 - r1).sqrt()
-                        };
-                        let dy = if r2 < 1.0 {
-                            r2.sqrt() - 1.0
-                        } else {
-                            1.0 - (2.0 - r2).sqrt()
-                        };
-                        let d = cx *
-                                (((sx as f64 + 0.5 + dx) / 2.0 + x as f64) / (w as f64) - 0.5) +
-                                cy *
-                                (((sy as f64 + 0.5 + dy) / 2.0 + y as f64) / (h as f64) - 0.5) +
-                                cam.d;
-
-                        let ray = Ray::new(cam.o + d * 140.0, d.norm());
-                        r = r + render::radiance(&*scene, ray, 0, &mut xi) / samps as f64;
-                    }
-
-                    c = c + Vector::new(clamp(r.x), clamp(r.y), clamp(r.z)) / 4.0;
-                }
-            }
-
-            line.push(to_int(c.x));
-            line.push(to_int(c.y));
-            line.push(to_int(c.z));
-            line.push(0);
-        }
-
-        tx.send((y, line)).unwrap();
-    }
-}
 
 #[derive(Debug)]
 struct AppError<'a>(&'a str);
@@ -116,6 +43,43 @@ impl<'a> Error for AppError<'a> {
     fn description(&self) -> &str {
         self.0
     }
+}
+
+struct WorkIterator<'a, T: 'a>(&'a Mutex<(Receiver<T>, Receiver<()>)>);
+
+impl<'a, T: 'a> WorkIterator<'a, T> {
+    pub fn new(rx: &'a Mutex<(Receiver<T>, Receiver<()>)>) -> Self {
+        WorkIterator(rx)
+    }
+}
+
+impl<'a, T: 'a + Send> Iterator for WorkIterator<'a, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        let (ref rx, ref cancel) = *self.0.lock().unwrap();
+        select! {
+            value = rx.recv() => Some(value.unwrap()),
+            _ = cancel.recv() => None
+        }
+    }
+}
+
+macro_rules! clone {
+    (@param _) => ( _ );
+    (@param $x:ident) => ( $x );
+    ($($n:ident),+ => move || $body:expr) => (
+        {
+            $( let $n = $n.clone(); )+
+            move || $body
+        }
+    );
+    ($($n:ident),+ => move |$($p:tt),+| $body:expr) => (
+        {
+            $( let $n = $n.clone(); )+
+            move |$(clone!(@param $p),)+| $body
+        }
+    );
 }
 
 fn run() -> Result<i32, Box<Error>> {
@@ -192,12 +156,18 @@ fn run() -> Result<i32, Box<Error>> {
     let work = Arc::new(Mutex::new((rx_work, rx_cancel)));
 
     for _ in 0..threads {
-        let scene = scene.clone();
-        let work = work.clone();
-        let tx_images = tx_images.clone();
         thread::Builder::new()
             .stack_size(8 * 1024 * 1024)
-            .spawn(move || render(&*scene, cam, samps, w, h, stride, &*work, tx_images))
+            .spawn(clone!(scene, work, tx_images => move || {
+                render::render(&*scene,
+                       cam,
+                       samps,
+                       w,
+                       h,
+                       stride,
+                       &mut WorkIterator::new(&work),
+                       tx_images)
+            }))
             .unwrap();
     }
 
@@ -210,38 +180,32 @@ fn run() -> Result<i32, Box<Error>> {
     window.add(&area);
 
     let surface = Rc::new(RefCell::new(ImageSurface::create(Format::Rgb24, w as i32, h as i32)));
+    area.connect_draw(clone!(surface => move |_, cr| {
+        let surface = surface.borrow();
+        cr.set_source_surface(&*surface, 0.0, 0.0);
+        cr.paint();
+        Inhibit(false)
+    }));
 
-    {
-        let surface = surface.clone();
-        area.connect_draw(move |_, cr| {
+    gtk::timeout_add(200,
+                     clone!(surface => move || {
+        while let Ok((y, line)) = rx_images.try_recv() {
+            let y = h - y - 1;
+            let line_surface = ImageSurface::create_for_data(line.into_boxed_slice(),
+                                                             |_| (),
+                                                             Format::Rgb24,
+                                                             w as i32,
+                                                             1,
+                                                             stride as i32);
             let surface = surface.borrow();
-            cr.set_source_surface(&*surface, 0.0, 0.0);
+            let cr = Context::new(&*surface);
+            cr.set_source_surface(&line_surface, 0.0, y as f64);
             cr.paint();
-            Inhibit(false)
-        });
-    }
+            area.queue_draw_area(0, y as i32, w as i32, 1);
+        }
 
-    {
-        let surface = surface.clone();
-        gtk::timeout_add(200, move || {
-            while let Ok((y, line)) = rx_images.try_recv() {
-                let y = h - y - 1;
-                let line_surface = ImageSurface::create_for_data(line.into_boxed_slice(),
-                                                                 |_| (),
-                                                                 Format::Rgb24,
-                                                                 w as i32,
-                                                                 1,
-                                                                 stride as i32);
-                let surface = surface.borrow();
-                let cr = Context::new(&*surface);
-                cr.set_source_surface(&line_surface, 0.0, y as f64);
-                cr.paint();
-                area.queue_draw_area(0, y as i32, w as i32, 1);
-            }
-
-            Continue(true)
-        });
-    }
+        Continue(true)
+    }));
 
     window.show_all();
     gtk::main();
