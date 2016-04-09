@@ -7,8 +7,8 @@ extern crate rand;
 
 use cairo::{Context, Format, ImageSurface};
 use gtk::prelude::*;
-use radiance::{Vector, Ray, Sphere};
-use radiance::Refl::*;
+use scene::{Vector, Ray, Sphere};
+use scene::Refl::*;
 use std::cell::RefCell;
 use std::env;
 use std::error::Error;
@@ -23,6 +23,7 @@ use std::thread;
 
 mod radiance;
 mod render;
+mod scene;
 
 #[derive(Debug)]
 struct AppError<'a>(&'a str);
@@ -94,53 +95,51 @@ fn run() -> Result<i32, Box<Error>> {
         Inhibit(false)
     });
 
-    let zero = Vector::new(0.0, 0.0, 0.0);
-
     // Scene: radius, position, emission, color, material
     let scene = Arc::new([Sphere::new(1e5,
                                       Vector::new(1e5 + 1.0, 40.8, 81.6),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.75, 0.25, 0.25),
                                       Diff), // Left
                           Sphere::new(1e5,
                                       Vector::new(-1e5 + 99.0, 40.8, 81.6),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.25, 0.25, 0.75),
                                       Diff), // Rght
                           Sphere::new(1e5,
                                       Vector::new(50.0, 40.8, 1e5),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.75, 0.75, 0.75),
                                       Diff), // Back
                           Sphere::new(1e5,
                                       Vector::new(50.0, 40.8, -1e5 + 170.0),
-                                      zero,
-                                      zero,
+                                      Vector::zero(),
+                                      Vector::zero(),
                                       Diff), // Frnt
                           Sphere::new(1e5,
                                       Vector::new(50.0, 1e5, 81.6),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.75, 0.75, 0.75),
                                       Diff), // Botm
                           Sphere::new(1e5,
                                       Vector::new(50.0, -1e5 + 81.6, 81.6),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.75, 0.75, 0.75),
                                       Diff), // Top
                           Sphere::new(16.5,
                                       Vector::new(27.0, 16.5, 47.0),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.999, 0.999, 0.999),
                                       Spec), // Mirr
                           Sphere::new(16.5,
                                       Vector::new(73.0, 16.5, 78.0),
-                                      zero,
+                                      Vector::zero(),
                                       Vector::new(0.999, 0.999, 0.999),
                                       Refr), // Glas
                           Sphere::new(600.0,
                                       Vector::new(50.0, 681.6 - 0.27, 81.6),
                                       Vector::new(12.0, 12.0, 12.0),
-                                      zero,
+                                      Vector::zero(),
                                       Diff) /* Lite */]);
 
     let w = 1024;

@@ -1,5 +1,6 @@
-use radiance::{self, Vector, Ray, Sphere};
+use radiance;
 use rand::{Rng, SeedableRng, StdRng};
+use scene::{Vector, Ray, Sphere};
 use std::sync::mpsc::Sender;
 
 fn clamp(x: f64) -> f64 {
@@ -26,10 +27,10 @@ pub fn render<Work: Iterator<Item = usize>>(scene: &[Sphere],
 
         let mut line = Vec::with_capacity(stride);
         for x in 0..w {
-            let mut c = Vector::new(0.0, 0.0, 0.0);
+            let mut c = Vector::zero();
             for sy in 0..2 {
                 for sx in 0..2 {
-                    let mut r = Vector::new(0.0, 0.0, 0.0);
+                    let mut r = Vector::zero();
                     for _ in 0..samps {
                         let r1 = 2.0 * xi.next_f64();
                         let r2 = 2.0 * xi.next_f64();
