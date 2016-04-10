@@ -70,7 +70,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
 
             Refl::Spec => {
                 let ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
-                hit.emit + f * radiance(scene, ray, depth, Xi)
+                radiance(scene, ray, depth, Xi)
             }
 
             Refl::Refr => {
