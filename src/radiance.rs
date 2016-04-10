@@ -29,24 +29,19 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
             n * -1.0
         };
 
-        let mut f = hit.color;
-
-        let p = if f.x > f.y && f.x > f.z {
-            f.x
-        } else if f.y > f.z {
-            f.y
-        } else {
-            f.z
-        };
-
         let depth = depth + 1;
-        if depth > 5 {
+        let color = hit.color;
+
+        let color = if depth > 5 {
+            let p = color.x.max(color.y).max(color.z);
             if Xi.next_f64() >= p {
                 return hit.emit;
             }
 
-            f = f / p;
-        }
+            color / p
+        } else {
+            color
+        };
 
         let next = match hit.refl {
             Refl::Diff => {
@@ -126,7 +121,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
             }
         };
 
-        hit.emit + f * next
+        hit.emit + color * next
     } else {
         Vector::zero()
     }
