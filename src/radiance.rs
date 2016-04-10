@@ -1,5 +1,5 @@
 use rand::Rng;
-use scene::{Vector, Ray, Refl, Sphere};
+use scene::{Hit, Ray, Refl, Sphere, Vector};
 use std::f64;
 
 fn min_by_float_key<T: Iterator<Item = U>, U, F: Fn(&U) -> f64>(iter: &mut T, f: F) -> Option<U> {
@@ -13,25 +13,23 @@ fn min_by_float_key<T: Iterator<Item = U>, U, F: Fn(&U) -> f64>(iter: &mut T, f:
         .map(|(_, min_item)| min_item)
 }
 
-fn intersect(scene: &[Sphere], ray: Ray) -> Option<(&Sphere, f64)> {
-    let mut hits = scene.iter()
-                        .filter_map(|s| s.intersect(ray).map(|t| (s, t)));
-
-    min_by_float_key(&mut hits, |&(_, t)| t)
+fn intersect(scene: &[Sphere], ray: Ray) -> Option<Hit> {
+    let mut hits = scene.iter().filter_map(|s| s.intersect(ray));
+    min_by_float_key(&mut hits, |ref hit| hit.t)
 }
 
 #[allow(non_snake_case)]
 pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> Vector {
-    if let Some((obj, t)) = intersect(scene, ray) {
-        let x = ray.o + (ray.d * t);
-        let n = (x - obj.p).norm();
+    if let Some(hit) = intersect(scene, ray) {
+        let x = hit.pos;
+        let n = hit.norm;
         let nl = if n.dot(ray.d) < 0.0 {
             n
         } else {
             n * -1.0
         };
 
-        let mut f = obj.c;
+        let mut f = hit.color;
 
         let p = if f.x > f.y && f.x > f.z {
             f.x
@@ -44,13 +42,13 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
         let depth = depth + 1;
         if depth > 5 {
             if Xi.next_f64() >= p {
-                return obj.e;
+                return hit.emit;
             }
 
             f = f / p;
         }
 
-        let next = match obj.refl {
+        let next = match hit.refl {
             Refl::Diff => {
                 let r1 = 2.0 * f64::consts::PI * Xi.next_f64();
                 let r2 = Xi.next_f64();
@@ -72,7 +70,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
 
             Refl::Spec => {
                 let ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
-                obj.e + f * radiance(scene, ray, depth, Xi)
+                hit.emit + f * radiance(scene, ray, depth, Xi)
             }
 
             Refl::Refr => {
@@ -128,7 +126,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
             }
         };
 
-        obj.e + f * next
+        hit.emit + f * next
     } else {
         Vector::zero()
     }

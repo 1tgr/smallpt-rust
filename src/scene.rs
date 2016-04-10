@@ -89,10 +89,34 @@ impl Ray {
     }
 }
 
+#[derive(Copy, Clone)]
 pub enum Refl {
     Diff,
     Spec,
     Refr,
+}
+
+#[derive(Copy, Clone)]
+pub struct Hit {
+    pub t: f64,
+    pub pos: Vector,
+    pub norm: Vector,
+    pub emit: Vector,
+    pub color: Vector,
+    pub refl: Refl,
+}
+
+impl Hit {
+    pub fn new(t: f64, pos: Vector, norm: Vector, emit: Vector, color: Vector, refl: Refl) -> Self {
+        Hit {
+            t: t,
+            pos: pos,
+            norm: norm,
+            emit: emit,
+            color: color,
+            refl: refl,
+        }
+    }
 }
 
 pub struct Sphere {
@@ -114,26 +138,32 @@ impl Sphere {
         }
     }
 
-    pub fn intersect(&self, ray: Ray) -> Option<f64> {
+    pub fn intersect(&self, ray: Ray) -> Option<Hit> {
         let op = self.p - ray.o;
         let eps = 1e-4;
         let b = op.dot(ray.d);
         let det = b * b - op.dot(op) + self.rad * self.rad;
         if det < 0.0 {
-            None
-        } else {
-            let det = det.sqrt();
+            return None;
+        }
+
+        let det = det.sqrt();
+        let t = {
             let t = b - det;
             if t > eps {
-                Some(t)
+                t
             } else {
                 let t = b + det;
                 if t > eps {
-                    Some(t)
+                    t
                 } else {
-                    None
+                    return None;
                 }
             }
-        }
+        };
+
+        let x = ray.o + (ray.d * t);
+        let n = (x - self.p).norm();
+        Some(Hit::new(t, x, n, self.e, self.c, self.refl))
     }
 }
