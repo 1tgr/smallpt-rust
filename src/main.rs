@@ -5,8 +5,13 @@ extern crate glib;
 extern crate gtk;
 extern crate rand;
 
+mod radiance;
+mod render;
+mod scene;
+
 use cairo::{Context, Format, ImageSurface};
 use gtk::prelude::*;
+use render::Rectangle;
 use scene::{Vector, Ray, Sphere};
 use scene::Refl::*;
 use std::cell::RefCell;
@@ -14,16 +19,13 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::io::{Write, stderr};
+use std::mem;
 use std::process;
 use std::rc::Rc;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-
-mod radiance;
-mod render;
-mod scene;
 
 #[derive(Debug)]
 struct AppError<'a>(&'a str);
@@ -144,31 +146,37 @@ fn run() -> Result<i32, Box<Error>> {
 
     let w = 1024;
     let h = 768;
-    let stride = w * 4;
-    let threads = 4;
     let samps = env::args().nth(1).map(|s| s.parse().unwrap()).unwrap_or(1);
     let cam = Ray::new(Vector::new(50.0, 52.0, 295.6),
                        Vector::new(0.0, -0.042612, -1.0).norm());
     let (tx_work, rx_work) = mpsc::channel();
-    let (tx_cancel, rx_cancel) = mpsc::channel();
+    let (_tx_cancel, rx_cancel) = mpsc::channel();
     let (tx_images, rx_images) = mpsc::channel();
     let work = Arc::new(Mutex::new((rx_work, rx_cancel)));
 
-    for _ in 0..threads {
+    for _ in 0..4 {
         thread::spawn(clone!(scene, work, tx_images => move || {
             render::render(&*scene,
                            cam,
                            samps,
                            w,
                            h,
-                           stride,
                            &mut WorkIterator::new(&work),
                            &tx_images)
         }));
     }
 
-    for y in 0..h {
-        tx_work.send(y).unwrap();
+    {
+        let mut y = 0;
+        while y < h {
+            let mut x = 0;
+            while x < w {
+                tx_work.send(Rectangle::new(x, y, 32, 32)).unwrap();
+                x += 32;
+            }
+
+            y += 32;
+        }
     }
 
     let area = gtk::DrawingArea::new();
@@ -185,19 +193,19 @@ fn run() -> Result<i32, Box<Error>> {
 
     gtk::timeout_add(200,
                      clone!(surface => move || {
-        while let Ok((y, line)) = rx_images.try_recv() {
-            let y = h - y - 1;
-            let line_surface = ImageSurface::create_for_data(line.into_boxed_slice(),
-                                                             |_| (),
-                                                             Format::Rgb24,
-                                                             w as i32,
-                                                             1,
-                                                             stride as i32);
+        while let Ok((rect, image)) = rx_images.try_recv() {
+            let image_surface = ImageSurface::create_for_data(image.into_boxed_slice(),
+                                                              mem::drop,
+                                                              Format::Rgb24,
+                                                              rect.width as i32,
+                                                              rect.height as i32,
+                                                              (rect.width * 4) as i32);
+
             let surface = surface.borrow();
             let cr = Context::new(&*surface);
-            cr.set_source_surface(&line_surface, 0.0, y as f64);
+            cr.set_source_surface(&image_surface, rect.left as f64, rect.top as f64);
             cr.paint();
-            area.queue_draw_area(0, y as i32, w as i32, 1);
+            area.queue_draw_area(rect.left as i32, rect.top as i32, rect.width as i32, rect.height as i32);
         }
 
         Continue(true)
