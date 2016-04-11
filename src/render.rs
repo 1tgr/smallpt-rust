@@ -18,9 +18,9 @@ pub fn render<Work: Iterator<Item = usize>>(scene: &[Sphere],
                                             h: usize,
                                             stride: usize,
                                             work: &mut Work,
-                                            tx: Sender<(usize, Vec<u8>)>) {
+                                            tx: &Sender<(usize, Vec<u8>)>) {
     let mut xi = StdRng::new().unwrap();
-    let cx = Vector::new((w as f64) * 0.5135 / (h as f64), 0.0, 0.0);
+    let cx = Vector::new(w as f64 * 0.5135 / h as f64, 0.0, 0.0);
     let cy = cx.cross(cam.d).norm() * 0.5135;
     for y in work {
         xi.reseed(&[y * y * y]);

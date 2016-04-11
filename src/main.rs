@@ -163,7 +163,7 @@ fn run() -> Result<i32, Box<Error>> {
                            h,
                            stride,
                            &mut WorkIterator::new(&work),
-                           tx_images)
+                           &tx_images)
         }));
     }
 
