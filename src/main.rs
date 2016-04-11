@@ -155,19 +155,16 @@ fn run() -> Result<i32, Box<Error>> {
     let work = Arc::new(Mutex::new((rx_work, rx_cancel)));
 
     for _ in 0..threads {
-        thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
-            .spawn(clone!(scene, work, tx_images => move || {
-                render::render(&*scene,
-                       cam,
-                       samps,
-                       w,
-                       h,
-                       stride,
-                       &mut WorkIterator::new(&work),
-                       tx_images)
-            }))
-            .unwrap();
+        thread::spawn(clone!(scene, work, tx_images => move || {
+            render::render(&*scene,
+                           cam,
+                           samps,
+                           w,
+                           h,
+                           stride,
+                           &mut WorkIterator::new(&work),
+                           tx_images)
+        }));
     }
 
     for y in 0..h {

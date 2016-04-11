@@ -20,7 +20,17 @@ fn intersect(scene: &[Sphere], ray: Ray) -> Option<Hit> {
 
 #[allow(non_snake_case)]
 pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> Vector {
-    if let Some(hit) = intersect(scene, ray) {
+    let mut result = Vector::zero();
+    let mut work = Vec::new();
+    work.push((Vector::new(1.0, 1.0, 1.0), ray, depth));
+    while let Some((scale, ray, depth)) = work.pop() {
+        let hit = match intersect(scene, ray) {
+            Some(hit) => hit,
+            None => {
+                continue;
+            }
+        };
+
         let x = hit.pos;
         let n = hit.norm;
         let nl = if n.dot(ray.d) < 0.0 {
@@ -30,12 +40,13 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
         };
 
         let depth = depth + 1;
-        let color = hit.color;
+        let color = scale * hit.color;
+        result = result + scale * hit.emit;
 
         let color = if depth > 5 {
             let p = color.x.max(color.y).max(color.z);
             if Xi.next_f64() >= p {
-                return hit.emit;
+                continue;
             }
 
             color / p
@@ -43,7 +54,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
             color
         };
 
-        let next = match hit.refl {
+        match hit.refl {
             Refl::Diff => {
                 let r1 = 2.0 * f64::consts::PI * Xi.next_f64();
                 let r2 = Xi.next_f64();
@@ -60,12 +71,12 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                 let d = (u * (r1.cos() * r2s) + (v * (r1.sin() * r2s)) + (w * ((1.0 - r2).sqrt())))
                             .norm();
                 let ray = Ray::new(x, d);
-                radiance(scene, ray, depth, Xi)
+                work.push((color, ray, depth));
             }
 
             Refl::Spec => {
                 let ray = Ray::new(x, ray.d - (n * (2.0 * n.dot(ray.d))));
-                radiance(scene, ray, depth, Xi)
+                work.push((color, ray, depth));
             }
 
             Refl::Refr => {
@@ -81,7 +92,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                 let ddn = ray.d.dot(nl);
                 let cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
                 if cos2t < 0.0 {
-                    radiance(scene, refl_ray, depth, Xi)
+                    work.push((color, refl_ray, depth));
                 } else {
                     let tdir = (ray.d * nnt -
                                 n *
@@ -107,22 +118,20 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
                     let TP = Tr / (1.0 - P);
                     if depth > 2 {
                         if Xi.next_f64() < P {
-                            radiance(scene, refl_ray, depth, Xi) * RP
+                            work.push((color * RP, refl_ray, depth));
                         } else {
                             let ray = Ray::new(x, tdir);
-                            radiance(scene, ray, depth, Xi) * TP
+                            work.push((color * TP, ray, depth));
                         }
                     } else {
                         let ray = Ray::new(x, tdir);
-                        radiance(scene, refl_ray, depth, Xi) * Re +
-                        radiance(scene, ray, depth, Xi) * Tr
+                        work.push((color * Re, refl_ray, depth));
+                        work.push((color * Tr, ray, depth));
                     }
                 }
             }
-        };
-
-        hit.emit + color * next
-    } else {
-        Vector::zero()
+        }
     }
+
+    result
 }
