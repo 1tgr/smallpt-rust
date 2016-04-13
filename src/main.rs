@@ -167,15 +167,28 @@ fn run() -> Result<i32, Box<Error>> {
     }
 
     {
+        let mut tiles = Vec::new();
         let mut y = 0;
         while y < h {
             let mut x = 0;
             while x < w {
-                tx_work.send(Rectangle::new(x, y, 32, 32)).unwrap();
+                tiles.push(Rectangle::new(x, y, 32, 32));
                 x += 32;
             }
 
             y += 32;
+        }
+
+        tiles.sort_by_key(|tile| {
+            let tx = tile.left + tile.width / 2;
+            let ty = tile.top + tile.height / 2;
+            let dx = tx - w / 2;
+            let dy = ty - h / 2;
+            (dx * dx + dy * dy, tile.top, tile.left)
+        });
+
+        for tile in tiles {
+            tx_work.send(tile).unwrap();
         }
     }
 
