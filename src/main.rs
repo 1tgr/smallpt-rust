@@ -89,7 +89,8 @@ fn run() -> Result<i32, Box<Error>> {
     try!(gtk::init().map_err(|()| AppError::new("Failed to initialise GTK")));
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
 
-    window.set_title("smallpt");
+    let title = "smallpt";
+    window.set_title(title);
     window.set_border_width(10);
 
     window.connect_delete_event(|_, _| {
@@ -204,8 +205,13 @@ fn run() -> Result<i32, Box<Error>> {
         Inhibit(false)
     }));
 
+    let window = Rc::new(RefCell::new(window));
+    let mut total_pixels = 0;
+    let mut total_time = 0;
     gtk::timeout_add(200,
-                     clone!(surface => move || {
+                     clone!(surface, window => move || {
+        let window = window.borrow();
+        total_time += 200;
         while let Ok((rect, image)) = rx_images.try_recv() {
             let image_surface = ImageSurface::create_for_data(image.into_boxed_slice(),
                                                               mem::drop,
@@ -219,12 +225,15 @@ fn run() -> Result<i32, Box<Error>> {
             cr.set_source_surface(&image_surface, rect.left as f64, rect.top as f64);
             cr.paint();
             area.queue_draw_area(rect.left as i32, rect.top as i32, rect.width as i32, rect.height as i32);
+            total_pixels += rect.width * rect.height;
         }
 
+        let title = format!("{} ({} pixels/sec)", title, (1000 * total_pixels) / total_time);
+        window.set_title(&title);
         Continue(true)
     }));
 
-    window.show_all();
+    window.borrow().show_all();
     gtk::main();
     Ok(0)
 }
