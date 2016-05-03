@@ -41,16 +41,17 @@ pub fn render<Work: Iterator<Item = Rectangle>>(scene: &[Sphere],
     let cx = Vector::new(w as f64 * 0.5135 / h as f64, 0.0, 0.0);
     let cy = cx.cross(cam.d).norm() * 0.5135;
     for rect in work {
-        let mut image = Vec::with_capacity(rect.width * 4 * rect.height);
-        for y in rect.top..rect.top + rect.height {
-            let y = h - y - 1;
-            xi.reseed(&[y * y * y]);
-            for x in rect.left..rect.left + rect.width {
-                let mut c = Vector::zero();
-                for sy in 0..2 {
-                    for sx in 0..2 {
-                        let mut r = Vector::zero();
-                        for _ in 0..samps {
+        let mut acc = vec![Vector::zero(); rect.width * rect.height];
+        for samp in 0..samps {
+            xi.reseed(&[samp * samp * samp]);
+            let mut image = Vec::with_capacity(rect.width * 4 * rect.height);
+            for y in rect.top..rect.top + rect.height {
+                let offset = ((y - rect.top) * rect.width) as isize - rect.left as isize;
+                let y = h - y - 1;
+                for x in rect.left..rect.left + rect.width {
+                    let mut r = &mut acc[(offset + x as isize) as usize];
+                    for sy in 0..2 {
+                        for sx in 0..2 {
                             let r1 = 2.0 * xi.next_f64();
                             let r2 = 2.0 * xi.next_f64();
                             let dx = if r1 < 1.0 {
@@ -70,20 +71,19 @@ pub fn render<Work: Iterator<Item = Rectangle>>(scene: &[Sphere],
                                      0.5) + cam.d;
 
                             let ray = Ray::new(cam.o + d * 140.0, d.norm());
-                            r = r + radiance::radiance(&*scene, ray, 0, &mut xi) / samps as f64;
+                            *r = *r + radiance::radiance(&*scene, ray, 0, &mut xi);
                         }
-
-                        c = c + Vector::new(clamp(r.x), clamp(r.y), clamp(r.z)) / 4.0;
                     }
+
+                    let f = 0.25 / (samp + 1) as f64;
+                    image.push(to_int(clamp(r.x * f)));
+                    image.push(to_int(clamp(r.y * f)));
+                    image.push(to_int(clamp(r.z * f)));
+                    image.push(0);
                 }
-
-                image.push(to_int(c.x));
-                image.push(to_int(c.y));
-                image.push(to_int(c.z));
-                image.push(0);
             }
-        }
 
-        tx.send((rect, image)).unwrap();
+            tx.send((rect, image)).unwrap();
+        }
     }
 }
