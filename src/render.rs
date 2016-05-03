@@ -71,7 +71,7 @@ pub fn render<Work: Iterator<Item = Rectangle>>(scene: &[Sphere],
                                      0.5) + cam.d;
 
                             let ray = Ray::new(cam.o + d * 140.0, d.norm());
-                            *r = *r + radiance::radiance(&*scene, ray, 0, &mut xi);
+                            *r += radiance::radiance(&*scene, ray, 0, &mut xi);
                         }
                     }
 

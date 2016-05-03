@@ -1,4 +1,4 @@
-use std::ops::{Add, Sub, Mul, Div};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Div, DivAssign};
 
 #[derive(Copy, Clone)]
 pub struct Vector {
@@ -29,11 +29,27 @@ impl Add for Vector {
     }
 }
 
+impl AddAssign for Vector {
+    fn add_assign(&mut self, other: Self) {
+        self.x += other.x;
+        self.y += other.y;
+        self.z += other.z;
+    }
+}
+
 impl Sub for Vector {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
         Self::new(self.x - other.x, self.y - other.y, self.z - other.z)
+    }
+}
+
+impl SubAssign for Vector {
+    fn sub_assign(&mut self, other: Self) {
+        self.x -= other.x;
+        self.y -= other.y;
+        self.z -= other.z;
     }
 }
 
@@ -45,6 +61,14 @@ impl Mul for Vector {
     }
 }
 
+impl MulAssign for Vector {
+    fn mul_assign(&mut self, other: Self) {
+        self.x *= other.x;
+        self.y *= other.y;
+        self.z *= other.z;
+    }
+}
+
 impl Mul<f64> for Vector {
     type Output = Self;
 
@@ -53,11 +77,27 @@ impl Mul<f64> for Vector {
     }
 }
 
+impl MulAssign<f64> for Vector {
+    fn mul_assign(&mut self, n: f64) {
+        self.x *= n;
+        self.y *= n;
+        self.z *= n;
+    }
+}
+
 impl Div<f64> for Vector {
     type Output = Self;
 
     fn div(self, n: f64) -> Self {
         Self::new(self.x / n, self.y / n, self.z / n)
+    }
+}
+
+impl DivAssign<f64> for Vector {
+    fn div_assign(&mut self, n: f64) {
+        self.x /= n;
+        self.y /= n;
+        self.z /= n;
     }
 }
 

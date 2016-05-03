@@ -200,7 +200,7 @@ pub fn radiance<R: Rng>(scene: &[Sphere], ray: Ray, depth: i32, Xi: &mut R) -> V
 
         let depth = depth + 1;
         let color = scale * hit.color;
-        result = result + scale * hit.emit;
+        result += scale * hit.emit;
 
         let color = if depth > 5 {
             let p = color.x.max(color.y).max(color.z);
