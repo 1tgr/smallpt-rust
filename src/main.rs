@@ -182,8 +182,8 @@ fn run() -> Result<i32, Box<Error>> {
         tiles.sort_by_key(|tile| {
             let tx = tile.left + tile.width / 2;
             let ty = tile.top + tile.height / 2;
-            let dx = tx - w / 2;
-            let dy = ty - h / 2;
+            let dx = tx as isize - w as isize / 2;
+            let dy = ty as isize - h as isize / 2;
             (dx * dx + dy * dy, tile.top, tile.left)
         });
 
