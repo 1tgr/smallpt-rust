@@ -3,6 +3,7 @@
 extern crate cairo;
 extern crate glib;
 extern crate gtk;
+extern crate num_cpus;
 extern crate rand;
 
 mod radiance;
@@ -155,7 +156,7 @@ fn run() -> Result<i32, Box<Error>> {
     let (tx_images, rx_images) = mpsc::channel();
     let work = Arc::new(Mutex::new((rx_work, rx_cancel)));
 
-    for _ in 0..4 {
+    for _ in 0..num_cpus::get() {
         thread::spawn(clone!(scene, work, tx_images => move || {
             render::render(&*scene,
                            cam,
