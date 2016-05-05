@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
+use api::{Ray, Refl, Sphere, Vector};
 use rand::Rng;
-use scene::{Hit, Ray, Refl, Sphere, Vector};
+use scene::Hit;
 use std::f64;
 
 fn diffuse<R: Rng>(_depth: i32,

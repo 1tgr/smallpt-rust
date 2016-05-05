@@ -6,13 +6,21 @@ build = "build.rs"
 
 [dependencies]
 cairo-rs = "0.0.8"
+docopt = "0.6"
+flate2 = "0.2"
 glib = "0.0.8"
+hyper = "0.8"
+iron = "0.3"
 num_cpus = "0.2"
 rand = "0.3"
+rustc-serialize = "0.3"
 
 [dependencies.gtk]
 version = "0.0.7"
 features = ["v3_10"]
+
+[dependencies.rustless]
+git = "https://github.com/rustless/rustless"
 
 [build-dependencies]
 pkg-config = "0.3"

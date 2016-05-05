@@ -1,18 +1,8 @@
+use api::{Vector, Ray, Refl, Sphere};
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Div, DivAssign};
 
-#[derive(Copy, Clone)]
-pub struct Vector {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-}
-
 impl Vector {
-    pub fn new(x: f64, y: f64, z: f64) -> Self {
-        Vector { x: x, y: y, z: z }
-    }
-
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Vector {
             x: 0.0,
             y: 0.0,
@@ -117,25 +107,6 @@ impl Vector {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct Ray {
-    pub o: Vector,
-    pub d: Vector,
-}
-
-impl Ray {
-    pub fn new(o: Vector, d: Vector) -> Self {
-        Ray { o: o, d: d }
-    }
-}
-
-pub enum Refl {
-    Diff,
-    Spec,
-    Refr,
-    Mix(f64, Box<Refl>, Box<Refl>),
-}
-
 pub struct Hit<'a> {
     pub pos: Vector,
     pub norm: Vector,
@@ -145,7 +116,12 @@ pub struct Hit<'a> {
 }
 
 impl<'a> Hit<'a> {
-    pub fn new(pos: Vector, norm: Vector, emit: Vector, color: Vector, refl: &'a Refl) -> Self {
+    pub const fn new(pos: Vector,
+                     norm: Vector,
+                     emit: Vector,
+                     color: Vector,
+                     refl: &'a Refl)
+                     -> Self {
         Hit {
             pos: pos,
             norm: norm,
@@ -156,25 +132,7 @@ impl<'a> Hit<'a> {
     }
 }
 
-pub struct Sphere {
-    pub rad: f64,
-    pub p: Vector,
-    pub e: Vector,
-    pub c: Vector,
-    pub refl: Refl,
-}
-
 impl Sphere {
-    pub fn new(rad: f64, p: Vector, e: Vector, c: Vector, refl: Refl) -> Self {
-        Sphere {
-            rad: rad,
-            p: p,
-            e: e,
-            c: c,
-            refl: refl,
-        }
-    }
-
     pub fn intersect(&self, ray: Ray) -> Option<(f64, Hit)> {
         let op = self.p - ray.o;
         let eps = 1e-4;
